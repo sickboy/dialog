@@ -1,9 +1,9 @@
 'use strict';
 
-System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injection'], function (_export, _context) {
+System.register(['aurelia-pal', 'aurelia-dependency-injection'], function (_export, _context) {
   "use strict";
 
-  var dialogOptions, DOM, transient, _dec, _class, containerTagName, overlayTagName, transitionEvent, DialogRenderer;
+  var DOM, transient, _dec, _class, containerTagName, overlayTagName, transitionEvent, DialogRenderer;
 
   
 
@@ -15,9 +15,7 @@ System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injectio
     child.style.marginBottom = Math.max((vh - child.offsetHeight) / 2, 30) + 'px';
   }
   return {
-    setters: [function (_dialogOptions) {
-      dialogOptions = _dialogOptions.dialogOptions;
-    }, function (_aureliaPal) {
+    setters: [function (_aureliaPal) {
       DOM = _aureliaPal.DOM;
     }, function (_aureliaDependencyInjection) {
       transient = _aureliaDependencyInjection.transient;
@@ -65,8 +63,6 @@ System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injectio
               }
             }
           };
-
-          this.defaultSettings = dialogOptions;
         }
 
         DialogRenderer.prototype.getDialogContainer = function getDialogContainer() {
@@ -76,7 +72,7 @@ System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injectio
         DialogRenderer.prototype.showDialog = function showDialog(dialogController) {
           var _this2 = this;
 
-          var settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+          var settings = dialogController.settings;
           var body = DOM.querySelectorAll('body')[0];
           var wrapper = document.createElement('div');
 
@@ -102,8 +98,8 @@ System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injectio
             centerDialog(_this2.modalContainer);
           };
 
-          this.modalOverlay.style.zIndex = this.defaultSettings.startingZIndex;
-          this.modalContainer.style.zIndex = this.defaultSettings.startingZIndex;
+          this.modalOverlay.style.zIndex = settings.startingZIndex;
+          this.modalContainer.style.zIndex = settings.startingZIndex;
 
           var lastContainer = Array.from(body.querySelectorAll(containerTagName)).pop();
 
@@ -157,7 +153,7 @@ System.register(['./dialog-options', 'aurelia-pal', 'aurelia-dependency-injectio
         DialogRenderer.prototype.hideDialog = function hideDialog(dialogController) {
           var _this3 = this;
 
-          var settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+          var settings = dialogController.settings;
           var body = DOM.querySelectorAll('body')[0];
 
           this.modalContainer.removeEventListener('click', this.closeModalClick);

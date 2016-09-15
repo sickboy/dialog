@@ -1,7 +1,179 @@
-import {customAttribute,customElement,inlineView,bindable,CompositionEngine,ViewSlot} from 'aurelia-templating';
 import {DOM} from 'aurelia-pal';
 import {transient,Container} from 'aurelia-dependency-injection';
+import {customAttribute,customElement,inlineView,bindable,CompositionEngine,ViewSlot} from 'aurelia-templating';
 import {Origin} from 'aurelia-metadata';
+
+let containerTagName = 'ai-dialog-container';
+let overlayTagName = 'ai-dialog-overlay';
+let transitionEvent = (function() {
+  let transition = null;
+
+  return function() {
+    if (transition) return transition;
+
+    let t;
+    let el = DOM.createElement('fakeelement');
+    let transitions = {
+      'transition': 'transitionend',
+      'OTransition': 'oTransitionEnd',
+      'MozTransition': 'transitionend',
+      'WebkitTransition': 'webkitTransitionEnd'
+    };
+    for (t in transitions) {
+      if (el.style[t] !== undefined) {
+        transition = transitions[t];
+        return transition;
+      }
+    }
+  };
+}());
+
+@transient()
+export class DialogRenderer {
+  dialogControllers = [];
+  escapeKeyEvent = (e) => {
+    if (e.keyCode === 27) {
+      let top = this.dialogControllers[this.dialogControllers.length - 1];
+      if (top && top.settings.lock !== true) {
+        top.cancel();
+      }
+    }
+  };
+
+  getDialogContainer() {
+    return DOM.createElement('div');
+  }
+
+  showDialog(dialogController: DialogController) {
+    let settings = dialogController.settings;
+    let body = DOM.querySelectorAll('body')[0];
+    let wrapper = document.createElement('div');
+
+    this.modalOverlay = DOM.createElement(overlayTagName);
+    this.modalContainer = DOM.createElement(containerTagName);
+    this.anchor = dialogController.slot.anchor;
+    wrapper.appendChild(this.anchor);
+    this.modalContainer.appendChild(wrapper);
+
+    this.stopPropagation = (e) => { e._aureliaDialogHostClicked = true; };
+    this.closeModalClick = (e) => {
+      if (!settings.lock && !e._aureliaDialogHostClicked) {
+        dialogController.cancel();
+      } else {
+        return false;
+      }
+    };
+
+    dialogController.centerDialog = () => {
+      if (settings.centerHorizontalOnly) return;
+      centerDialog(this.modalContainer);
+    };
+
+    this.modalOverlay.style.zIndex = settings.startingZIndex;
+    this.modalContainer.style.zIndex = settings.startingZIndex;
+
+    let lastContainer = Array.from(body.querySelectorAll(containerTagName)).pop();
+
+    if (lastContainer) {
+      lastContainer.parentNode.insertBefore(this.modalContainer, lastContainer.nextSibling);
+      lastContainer.parentNode.insertBefore(this.modalOverlay, lastContainer.nextSibling);
+    } else {
+      body.insertBefore(this.modalContainer, body.firstChild);
+      body.insertBefore(this.modalOverlay, body.firstChild);
+    }
+
+    if (!this.dialogControllers.length) {
+      DOM.addEventListener('keyup', this.escapeKeyEvent);
+    }
+
+    this.dialogControllers.push(dialogController);
+
+    dialogController.slot.attached();
+
+    if (typeof settings.position === 'function') {
+      settings.position(this.modalContainer, this.modalOverlay);
+    } else {
+      dialogController.centerDialog();
+    }
+
+    this.modalContainer.addEventListener('click', this.closeModalClick);
+    this.anchor.addEventListener('click', this.stopPropagation);
+
+    return new Promise((resolve) => {
+      let renderer = this;
+      if (settings.ignoreTransitions) {
+        resolve();
+      } else {
+        this.modalContainer.addEventListener(transitionEvent(), onTransitionEnd);
+      }
+
+      this.modalOverlay.classList.add('active');
+      this.modalContainer.classList.add('active');
+      body.classList.add('ai-dialog-open');
+
+      function onTransitionEnd(e) {
+        if (e.target !== renderer.modalContainer) {
+          return;
+        }
+        renderer.modalContainer.removeEventListener(transitionEvent(), onTransitionEnd);
+        resolve();
+      }
+    });
+  }
+
+  hideDialog(dialogController: DialogController) {
+    let settings = dialogController.settings;
+    let body = DOM.querySelectorAll('body')[0];
+
+    this.modalContainer.removeEventListener('click', this.closeModalClick);
+    this.anchor.removeEventListener('click', this.stopPropagation);
+
+    let i = this.dialogControllers.indexOf(dialogController);
+    if (i !== -1) {
+      this.dialogControllers.splice(i, 1);
+    }
+
+    if (!this.dialogControllers.length) {
+      DOM.removeEventListener('keyup', this.escapeKeyEvent);
+    }
+
+    return new Promise((resolve) => {
+      let renderer = this;
+      if (settings.ignoreTransitions) {
+        resolve();
+      } else {
+        this.modalContainer.addEventListener(transitionEvent(), onTransitionEnd);
+      }
+
+      this.modalOverlay.classList.remove('active');
+      this.modalContainer.classList.remove('active');
+
+      function onTransitionEnd() {
+        renderer.modalContainer.removeEventListener(transitionEvent(), onTransitionEnd);
+        resolve();
+      }
+    })
+      .then(() => {
+        body.removeChild(this.modalOverlay);
+        body.removeChild(this.modalContainer);
+        dialogController.slot.detached();
+
+        if (!this.dialogControllers.length) {
+          body.classList.remove('ai-dialog-open');
+        }
+
+        return Promise.resolve();
+      });
+  }
+}
+
+function centerDialog(modalContainer) {
+  const child = modalContainer.children[0];
+  const vh = Math.max(DOM.querySelectorAll('html')[0].clientHeight, window.innerHeight || 0);
+
+  child.style.marginTop = Math.max((vh - child.offsetHeight) / 2, 30) + 'px';
+  child.style.marginBottom = Math.max((vh - child.offsetHeight) / 2, 30) + 'px';
+}
 
 /**
  * An abstract base class for implementors of the basic Renderer API.
@@ -78,7 +250,6 @@ export class AttachFocus {
     this.value = newValue;
   }
 }
-
 
 @customElement('ai-dialog')
 @inlineView(`
@@ -187,7 +358,9 @@ export class DialogController {
    * @returns Promise An empty promise object.
    */
   close(ok: boolean, output?: any): Promise<DialogResult> {
-    if (this._closePromise) return this._closePromise;
+    if (this._closePromise) { 
+      return this._closePromise;
+    }
 
     this._closePromise = invokeLifecycle(this.viewModel, 'canDeactivate').then(canDeactivate => {
       if (canDeactivate) {
@@ -202,364 +375,14 @@ export class DialogController {
           });
       }
 
-      return Promise.resolve();
+      this._closePromise = undefined;
+    }, e => {
+      this._closePromise = undefined;
+      return Promise.reject(e);
     });
 
     return this._closePromise;
   }
-}
-
-let containerTagName = 'ai-dialog-container';
-let overlayTagName = 'ai-dialog-overlay';
-let transitionEvent = (function() {
-  let transition = null;
-
-  return function() {
-    if (transition) return transition;
-
-    let t;
-    let el = DOM.createElement('fakeelement');
-    let transitions = {
-      'transition': 'transitionend',
-      'OTransition': 'oTransitionEnd',
-      'MozTransition': 'transitionend',
-      'WebkitTransition': 'webkitTransitionEnd'
-    };
-    for (t in transitions) {
-      if (el.style[t] !== undefined) {
-        transition = transitions[t];
-        return transition;
-      }
-    }
-  };
-}());
-
-@transient()
-export class DialogRenderer {
-  dialogControllers = [];
-  escapeKeyEvent = (e) => {
-    if (e.keyCode === 27) {
-      let top = this.dialogControllers[this.dialogControllers.length - 1];
-      if (top && top.settings.lock !== true) {
-        top.cancel();
-      }
-    }
-  };
-
-  constructor() {
-    this.defaultSettings = dialogOptions;
-  }
-
-  getDialogContainer() {
-    return DOM.createElement('div');
-  }
-
-  showDialog(dialogController: DialogController) {
-    let settings = Object.assign({}, this.defaultSettings, dialogController.settings);
-    let body = DOM.querySelectorAll('body')[0];
-    let wrapper = document.createElement('div');
-
-    this.modalOverlay = DOM.createElement(overlayTagName);
-    this.modalContainer = DOM.createElement(containerTagName);
-    this.anchor = dialogController.slot.anchor;
-    wrapper.appendChild(this.anchor);
-    this.modalContainer.appendChild(wrapper);
-
-    this.stopPropagation = (e) => { e._aureliaDialogHostClicked = true; };
-    this.closeModalClick = (e) => {
-      if (!settings.lock && !e._aureliaDialogHostClicked) {
-        dialogController.cancel();
-      } else {
-        return false;
-      }
-    };
-
-    dialogController.centerDialog = () => {
-      if (settings.centerHorizontalOnly) return;
-      centerDialog(this.modalContainer);
-    };
-
-    this.modalOverlay.style.zIndex = this.defaultSettings.startingZIndex;
-    this.modalContainer.style.zIndex = this.defaultSettings.startingZIndex;
-
-    let lastContainer = Array.from(body.querySelectorAll(containerTagName)).pop();
-
-    if (lastContainer) {
-      lastContainer.parentNode.insertBefore(this.modalContainer, lastContainer.nextSibling);
-      lastContainer.parentNode.insertBefore(this.modalOverlay, lastContainer.nextSibling);
-    } else {
-      body.insertBefore(this.modalContainer, body.firstChild);
-      body.insertBefore(this.modalOverlay, body.firstChild);
-    }
-
-    if (!this.dialogControllers.length) {
-      DOM.addEventListener('keyup', this.escapeKeyEvent);
-    }
-
-    this.dialogControllers.push(dialogController);
-
-    dialogController.slot.attached();
-
-    if (typeof settings.position === 'function') {
-      settings.position(this.modalContainer, this.modalOverlay);
-    } else {
-      dialogController.centerDialog();
-    }
-
-    this.modalContainer.addEventListener('click', this.closeModalClick);
-    this.anchor.addEventListener('click', this.stopPropagation);
-
-    return new Promise((resolve) => {
-      let renderer = this;
-      if (settings.ignoreTransitions) {
-        resolve();
-      } else {
-        this.modalContainer.addEventListener(transitionEvent(), onTransitionEnd);
-      }
-
-      this.modalOverlay.classList.add('active');
-      this.modalContainer.classList.add('active');
-      body.classList.add('ai-dialog-open');
-
-      function onTransitionEnd(e) {
-        if (e.target !== renderer.modalContainer) {
-          return;
-        }
-        renderer.modalContainer.removeEventListener(transitionEvent(), onTransitionEnd);
-        resolve();
-      }
-    });
-  }
-
-  hideDialog(dialogController: DialogController) {
-    let settings = Object.assign({}, this.defaultSettings, dialogController.settings);
-    let body = DOM.querySelectorAll('body')[0];
-
-    this.modalContainer.removeEventListener('click', this.closeModalClick);
-    this.anchor.removeEventListener('click', this.stopPropagation);
-
-    let i = this.dialogControllers.indexOf(dialogController);
-    if (i !== -1) {
-      this.dialogControllers.splice(i, 1);
-    }
-
-    if (!this.dialogControllers.length) {
-      DOM.removeEventListener('keyup', this.escapeKeyEvent);
-    }
-
-    return new Promise((resolve) => {
-      let renderer = this;
-      if (settings.ignoreTransitions) {
-        resolve();
-      } else {
-        this.modalContainer.addEventListener(transitionEvent(), onTransitionEnd);
-      }
-
-      this.modalOverlay.classList.remove('active');
-      this.modalContainer.classList.remove('active');
-
-      function onTransitionEnd() {
-        renderer.modalContainer.removeEventListener(transitionEvent(), onTransitionEnd);
-        resolve();
-      }
-    })
-      .then(() => {
-        body.removeChild(this.modalOverlay);
-        body.removeChild(this.modalContainer);
-        dialogController.slot.detached();
-
-        if (!this.dialogControllers.length) {
-          body.classList.remove('ai-dialog-open');
-        }
-
-        return Promise.resolve();
-      });
-  }
-}
-
-function centerDialog(modalContainer) {
-  const child = modalContainer.children[0];
-  const vh = Math.max(DOM.querySelectorAll('html')[0].clientHeight, window.innerHeight || 0);
-
-  child.style.marginTop = Math.max((vh - child.offsetHeight) / 2, 30) + 'px';
-  child.style.marginBottom = Math.max((vh - child.offsetHeight) / 2, 30) + 'px';
-}
-
-/**
- * * View-model for footer of Dialog.
- * */
-@customElement('ai-dialog-footer')
-@inlineView(`
-  <template>
-    <slot></slot>
-
-    <template if.bind="buttons.length > 0">
-      <button type="button" class="btn btn-default" repeat.for="button of buttons" click.trigger="close(button)">\${button}</button>
-    </template>
-  </template>
-`)
-export class AiDialogFooter {
-  static inject = [DialogController];
-
-  @bindable buttons: any[] = [];
-  @bindable useDefaultButtons: boolean = false;
-
-  constructor(controller: DialogController) {
-    this.controller = controller;
-  }
-
-  close(buttonValue: string) {
-    if (AiDialogFooter.isCancelButton(buttonValue)) {
-      this.controller.cancel(buttonValue);
-    } else {
-      this.controller.ok(buttonValue);
-    }
-  }
-
-  useDefaultButtonsChanged(newValue: boolean) {
-    if (newValue) {
-      this.buttons = ['Cancel', 'Ok'];
-    }
-  }
-
-  static isCancelButton(value: string) {
-    return value === 'Cancel';
-  }
-}
-
-@customElement('ai-dialog-header')
-@inlineView(`
-  <template>
-    <button type="button" class="dialog-close" aria-label="Close" if.bind="!controller.settings.lock" click.trigger="controller.cancel()">
-      <span aria-hidden="true">&times;</span>
-    </button>
-
-    <div class="dialog-header-content">
-      <slot></slot>
-    </div>
-  </template>
-`)
-export class AiDialogHeader {
-  static inject = [DialogController];
-
-  constructor(controller) {
-    this.controller = controller;
-  }
-}
-
-/**
- * A service allowing for the creation of dialogs.
- */
-export class DialogService {
-  static inject = [Container, CompositionEngine];
-
-  /**
-   * The current dialog controllers
-   */
-  controllers: DialogController[];
-  /**
-   * Is there an active dialog
-   */
-  hasActiveDialog: boolean;
-
-  constructor(container: Container, compositionEngine: CompositionEngine) {
-    this.container = container;
-    this.compositionEngine = compositionEngine;
-    this.controllers = [];
-    this.hasActiveDialog = false;
-  }
-
-  /**
-   * Opens a new dialog.
-   * @param settings Dialog settings for this dialog instance.
-   * @return Promise A promise that settles when the dialog is closed.
-   */
-  open(settings?: Object): Promise<DialogResult> {
-    let dialogController;
-
-    let promise = new Promise((resolve, reject) => {
-      let childContainer = this.container.createChild();
-      dialogController = new DialogController(childContainer.get(Renderer), settings, resolve, reject);
-      childContainer.registerInstance(DialogController, dialogController);
-      return _openDialog(this, childContainer, dialogController);
-    });
-
-    return promise.then((result) => {
-      let i = this.controllers.indexOf(dialogController);
-      if (i !== -1) {
-        this.controllers.splice(i, 1);
-        this.hasActiveDialog = !!this.controllers.length;
-      }
-
-      return result;
-    });
-  }
-
-  openAndYieldController(settings?: Object): Promise<DialogController> {
-    let childContainer = this.container.createChild();
-    let dialogController = new DialogController(childContainer.get(Renderer), settings, null, null);
-    childContainer.registerInstance(DialogController, dialogController);
-
-    dialogController.result = new Promise((resolve, reject) => {
-      dialogController._resolve = resolve;
-      dialogController._reject = reject;
-    }).then((result) => {
-      let i = this.controllers.indexOf(dialogController);
-      if (i !== -1) {
-        this.controllers.splice(i, 1);
-        this.hasActiveDialog = !!this.controllers.length;
-      }
-      return result;
-    });
-
-    return _openDialog(this, childContainer, dialogController).then(() => {
-      return dialogController;
-    });
-  }
-}
-
-function _openDialog(service, childContainer, dialogController) {
-  let host = dialogController.renderer.getDialogContainer();
-  let instruction = {
-    container: service.container,
-    childContainer: childContainer,
-    model: dialogController.settings.model,
-    view: dialogController.settings.view,
-    viewModel: dialogController.settings.viewModel,
-    viewSlot: new ViewSlot(host, true),
-    host: host
-  };
-
-  return _getViewModel(instruction, service.compositionEngine).then(returnedInstruction => {
-    dialogController.viewModel = returnedInstruction.viewModel;
-    dialogController.slot = returnedInstruction.viewSlot;
-
-    return invokeLifecycle(dialogController.viewModel, 'canActivate', dialogController.settings.model).then(canActivate => {
-      if (canActivate) {
-        service.controllers.push(dialogController);
-        service.hasActiveDialog = !!service.controllers.length;
-
-        return service.compositionEngine.compose(returnedInstruction).then(controller => {
-          dialogController.controller = controller;
-          dialogController.view = controller.view;
-
-          return dialogController.renderer.showDialog(dialogController);
-        });
-      }
-    });
-  });
-}
-
-function _getViewModel(instruction, compositionEngine) {
-  if (typeof instruction.viewModel === 'function') {
-    instruction.viewModel = Origin.get(instruction.viewModel).moduleId;
-  }
-
-  if (typeof instruction.viewModel === 'string') {
-    return compositionEngine.ensureViewModel(instruction);
-  }
-
-  return Promise.resolve(instruction);
 }
 
 let defaultRenderer = DialogRenderer;
@@ -652,5 +475,196 @@ export class DialogConfiguration {
     if (this.cssText) {
       DOM.injectStyles(this.cssText);
     }
+  }
+}
+
+/**
+ * * View-model for footer of Dialog.
+ * */
+@customElement('ai-dialog-footer')
+@inlineView(`
+  <template>
+    <slot></slot>
+
+    <template if.bind="buttons.length > 0">
+      <button type="button" class="btn btn-default" repeat.for="button of buttons" click.trigger="close(button)">\${button}</button>
+    </template>
+  </template>
+`)
+export class AiDialogFooter {
+  static inject = [DialogController];
+
+  @bindable buttons: any[] = [];
+  @bindable useDefaultButtons: boolean = false;
+
+  constructor(controller: DialogController) {
+    this.controller = controller;
+  }
+
+  close(buttonValue: string) {
+    if (AiDialogFooter.isCancelButton(buttonValue)) {
+      this.controller.cancel(buttonValue);
+    } else {
+      this.controller.ok(buttonValue);
+    }
+  }
+
+  useDefaultButtonsChanged(newValue: boolean) {
+    if (newValue) {
+      this.buttons = ['Cancel', 'Ok'];
+    }
+  }
+
+  static isCancelButton(value: string) {
+    return value === 'Cancel';
+  }
+}
+
+@customElement('ai-dialog-header')
+@inlineView(`
+  <template>
+    <button type="button" class="dialog-close" aria-label="Close" if.bind="!controller.settings.lock" click.trigger="controller.cancel()">
+      <span aria-hidden="true">&times;</span>
+    </button>
+
+    <div class="dialog-header-content">
+      <slot></slot>
+    </div>
+  </template>
+`)
+export class AiDialogHeader {
+  static inject = [DialogController];
+
+  constructor(controller) {
+    this.controller = controller;
+  }
+}
+
+/**
+ * A service allowing for the creation of dialogs.
+ */
+export class DialogService {
+  static inject = [Container, CompositionEngine];
+
+  /**
+   * The current dialog controllers
+   */
+  controllers: DialogController[];
+  /**
+   * Is there an active dialog
+   */
+  hasActiveDialog: boolean;
+
+  constructor(container: Container, compositionEngine: CompositionEngine) {
+    this.container = container;
+    this.compositionEngine = compositionEngine;
+    this.controllers = [];
+    this.hasActiveDialog = false;
+  }
+
+  /**
+   * Opens a new dialog.
+   * @param settings Dialog settings for this dialog instance.
+   * @return Promise A promise that settles when the dialog is closed.
+   */
+  open(settings?: Object): Promise<DialogResult> {
+    let childContainer = this.container.createChild();
+    let dialogController;
+    let promise = new Promise((resolve, reject) => {
+      dialogController = new DialogController(childContainer.get(Renderer), _createSettings(settings), resolve, reject);
+    });
+    childContainer.registerInstance(DialogController, dialogController);
+
+    return _openDialog(this, childContainer, dialogController)
+      .then(() => promise)
+      .then((result) => {
+        _removeController(this, dialogController);
+        return result;
+      });
+  }
+
+  /**
+   * Opens a new dialog.
+   * @param settings Dialog settings for this dialog instance.
+   * @return Promise A promise that settles when the dialog is opened.
+   * Resolves to the controller of the dialog.
+   */
+  openAndYieldController(settings?: Object): Promise<DialogController> {
+    let childContainer = this.container.createChild();
+    let dialogController = new DialogController(childContainer.get(Renderer), _createSettings(settings), null, null);
+    childContainer.registerInstance(DialogController, dialogController);
+
+    dialogController.result = new Promise((resolve, reject) => {
+      dialogController._resolve = resolve;
+      dialogController._reject = reject;
+    }).then((result) => {
+      _removeController(this, dialogController);
+      return result;
+    });
+
+    return _openDialog(this, childContainer, dialogController).then(() => {
+      return dialogController;
+    });
+  }
+}
+
+function _createSettings(settings) {
+  settings = Object.assign({}, dialogOptions, settings);
+  settings.startingZIndex = dialogOptions.startingZIndex; // should be set only when configuring the plugin
+  return settings;
+}
+
+function _openDialog(service, childContainer, dialogController) {
+  let host = dialogController.renderer.getDialogContainer();
+  let instruction = {
+    container: service.container,
+    childContainer: childContainer,
+    model: dialogController.settings.model,
+    view: dialogController.settings.view,
+    viewModel: dialogController.settings.viewModel,
+    viewSlot: new ViewSlot(host, true),
+    host: host
+  };
+
+  return _getViewModel(instruction, service.compositionEngine).then(returnedInstruction => {
+    dialogController.viewModel = returnedInstruction.viewModel;
+    dialogController.slot = returnedInstruction.viewSlot;
+
+    return invokeLifecycle(dialogController.viewModel, 'canActivate', dialogController.settings.model).then(canActivate => {
+      if (canActivate) {
+        service.controllers.push(dialogController);
+        service.hasActiveDialog = !!service.controllers.length;
+
+        return service.compositionEngine.compose(returnedInstruction).then(controller => {
+          dialogController.controller = controller;
+          dialogController.view = controller.view;
+
+          return dialogController.renderer.showDialog(dialogController);
+        }).catch(e => {
+          _removeController(service, dialogController);
+          return Promise.reject(e);
+        });
+      }
+    });
+  });
+}
+
+function _getViewModel(instruction, compositionEngine) {
+  if (typeof instruction.viewModel === 'function') {
+    instruction.viewModel = Origin.get(instruction.viewModel).moduleId;
+  }
+
+  if (typeof instruction.viewModel === 'string') {
+    return compositionEngine.ensureViewModel(instruction);
+  }
+
+  return Promise.resolve(instruction);
+}
+
+function _removeController(service, controller) {
+  let i = service.controllers.indexOf(controller);
+  if (i !== -1) {
+    service.controllers.splice(i, 1);
+    service.hasActiveDialog = !!service.controllers.length;
   }
 }

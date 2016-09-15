@@ -1,6 +1,5 @@
 var _dec, _class;
 
-import { dialogOptions } from './dialog-options';
 import { DOM } from 'aurelia-pal';
 import { transient } from 'aurelia-dependency-injection';
 
@@ -30,7 +29,6 @@ let transitionEvent = function () {
 }();
 
 export let DialogRenderer = (_dec = transient(), _dec(_class = class DialogRenderer {
-
   constructor() {
     this.dialogControllers = [];
 
@@ -42,8 +40,6 @@ export let DialogRenderer = (_dec = transient(), _dec(_class = class DialogRende
         }
       }
     };
-
-    this.defaultSettings = dialogOptions;
   }
 
   getDialogContainer() {
@@ -51,7 +47,7 @@ export let DialogRenderer = (_dec = transient(), _dec(_class = class DialogRende
   }
 
   showDialog(dialogController) {
-    let settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+    let settings = dialogController.settings;
     let body = DOM.querySelectorAll('body')[0];
     let wrapper = document.createElement('div');
 
@@ -77,8 +73,8 @@ export let DialogRenderer = (_dec = transient(), _dec(_class = class DialogRende
       centerDialog(this.modalContainer);
     };
 
-    this.modalOverlay.style.zIndex = this.defaultSettings.startingZIndex;
-    this.modalContainer.style.zIndex = this.defaultSettings.startingZIndex;
+    this.modalOverlay.style.zIndex = settings.startingZIndex;
+    this.modalContainer.style.zIndex = settings.startingZIndex;
 
     let lastContainer = Array.from(body.querySelectorAll(containerTagName)).pop();
 
@@ -130,7 +126,7 @@ export let DialogRenderer = (_dec = transient(), _dec(_class = class DialogRende
   }
 
   hideDialog(dialogController) {
-    let settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+    let settings = dialogController.settings;
     let body = DOM.querySelectorAll('body')[0];
 
     this.modalContainer.removeEventListener('click', this.closeModalClick);

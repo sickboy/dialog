@@ -9,6 +9,7 @@ import { DialogController } from './dialog-controller';
 import { Renderer } from './renderer';
 import { invokeLifecycle } from './lifecycle';
 import { DialogResult } from './dialog-result';
+import { dialogOptions } from './dialog-options';
 
 export var DialogService = (_temp = _class = function () {
   function DialogService(container, compositionEngine) {
@@ -23,22 +24,17 @@ export var DialogService = (_temp = _class = function () {
   DialogService.prototype.open = function open(settings) {
     var _this = this;
 
+    var childContainer = this.container.createChild();
     var dialogController = void 0;
-
     var promise = new Promise(function (resolve, reject) {
-      var childContainer = _this.container.createChild();
-      dialogController = new DialogController(childContainer.get(Renderer), settings, resolve, reject);
-      childContainer.registerInstance(DialogController, dialogController);
-      return _openDialog(_this, childContainer, dialogController);
+      dialogController = new DialogController(childContainer.get(Renderer), _createSettings(settings), resolve, reject);
     });
+    childContainer.registerInstance(DialogController, dialogController);
 
-    return promise.then(function (result) {
-      var i = _this.controllers.indexOf(dialogController);
-      if (i !== -1) {
-        _this.controllers.splice(i, 1);
-        _this.hasActiveDialog = !!_this.controllers.length;
-      }
-
+    return _openDialog(this, childContainer, dialogController).then(function () {
+      return promise;
+    }).then(function (result) {
+      _removeController(_this, dialogController);
       return result;
     });
   };
@@ -47,18 +43,14 @@ export var DialogService = (_temp = _class = function () {
     var _this2 = this;
 
     var childContainer = this.container.createChild();
-    var dialogController = new DialogController(childContainer.get(Renderer), settings, null, null);
+    var dialogController = new DialogController(childContainer.get(Renderer), _createSettings(settings), null, null);
     childContainer.registerInstance(DialogController, dialogController);
 
     dialogController.result = new Promise(function (resolve, reject) {
       dialogController._resolve = resolve;
       dialogController._reject = reject;
     }).then(function (result) {
-      var i = _this2.controllers.indexOf(dialogController);
-      if (i !== -1) {
-        _this2.controllers.splice(i, 1);
-        _this2.hasActiveDialog = !!_this2.controllers.length;
-      }
+      _removeController(_this2, dialogController);
       return result;
     });
 
@@ -69,6 +61,12 @@ export var DialogService = (_temp = _class = function () {
 
   return DialogService;
 }(), _class.inject = [Container, CompositionEngine], _temp);
+
+function _createSettings(settings) {
+  settings = Object.assign({}, dialogOptions, settings);
+  settings.startingZIndex = dialogOptions.startingZIndex;
+  return settings;
+}
 
 function _openDialog(service, childContainer, dialogController) {
   var host = dialogController.renderer.getDialogContainer();
@@ -96,6 +94,9 @@ function _openDialog(service, childContainer, dialogController) {
           dialogController.view = controller.view;
 
           return dialogController.renderer.showDialog(dialogController);
+        }).catch(function (e) {
+          _removeController(service, dialogController);
+          return Promise.reject(e);
         });
       }
     });
@@ -112,4 +113,12 @@ function _getViewModel(instruction, compositionEngine) {
   }
 
   return Promise.resolve(instruction);
+}
+
+function _removeController(service, controller) {
+  var i = service.controllers.indexOf(controller);
+  if (i !== -1) {
+    service.controllers.splice(i, 1);
+    service.hasActiveDialog = !!service.controllers.length;
+  }
 }

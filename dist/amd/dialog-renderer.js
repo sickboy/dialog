@@ -1,4 +1,4 @@
-define(['exports', './dialog-options', 'aurelia-pal', 'aurelia-dependency-injection'], function (exports, _dialogOptions, _aureliaPal, _aureliaDependencyInjection) {
+define(['exports', 'aurelia-pal', 'aurelia-dependency-injection'], function (exports, _aureliaPal, _aureliaDependencyInjection) {
   'use strict';
 
   Object.defineProperty(exports, "__esModule", {
@@ -51,8 +51,6 @@ define(['exports', './dialog-options', 'aurelia-pal', 'aurelia-dependency-inject
           }
         }
       };
-
-      this.defaultSettings = _dialogOptions.dialogOptions;
     }
 
     DialogRenderer.prototype.getDialogContainer = function getDialogContainer() {
@@ -62,7 +60,7 @@ define(['exports', './dialog-options', 'aurelia-pal', 'aurelia-dependency-inject
     DialogRenderer.prototype.showDialog = function showDialog(dialogController) {
       var _this2 = this;
 
-      var settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+      var settings = dialogController.settings;
       var body = _aureliaPal.DOM.querySelectorAll('body')[0];
       var wrapper = document.createElement('div');
 
@@ -88,8 +86,8 @@ define(['exports', './dialog-options', 'aurelia-pal', 'aurelia-dependency-inject
         centerDialog(_this2.modalContainer);
       };
 
-      this.modalOverlay.style.zIndex = this.defaultSettings.startingZIndex;
-      this.modalContainer.style.zIndex = this.defaultSettings.startingZIndex;
+      this.modalOverlay.style.zIndex = settings.startingZIndex;
+      this.modalContainer.style.zIndex = settings.startingZIndex;
 
       var lastContainer = Array.from(body.querySelectorAll(containerTagName)).pop();
 
@@ -143,7 +141,7 @@ define(['exports', './dialog-options', 'aurelia-pal', 'aurelia-dependency-inject
     DialogRenderer.prototype.hideDialog = function hideDialog(dialogController) {
       var _this3 = this;
 
-      var settings = Object.assign({}, this.defaultSettings, dialogController.settings);
+      var settings = dialogController.settings;
       var body = _aureliaPal.DOM.querySelectorAll('body')[0];
 
       this.modalContainer.removeEventListener('click', this.closeModalClick);
